@@ -21,15 +21,21 @@ func TestTelegramWireContract(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/sendMessage":
-			if body["parse_mode"] != nil {
-				t.Error("untrusted request must be plain text")
+			if body["parse_mode"] != "HTML" {
+				t.Error("message formatting is missing")
 			}
 			buttons := body["reply_markup"].(map[string]any)["inline_keyboard"].([]any)[0].([]any)
 			if buttons[0].(map[string]any)["callback_data"] != "a:nonce" {
 				t.Error("missing approve callback")
 			}
+			if buttons[0].(map[string]any)["style"] != "success" || buttons[1].(map[string]any)["style"] != "danger" {
+				t.Error("approval styles are missing")
+			}
 			fmt.Fprint(w, `{"ok":true,"result":{"message_id":7,"chat":{"id":42,"type":"private"}}}`)
 		case "/editMessageText":
+			if body["parse_mode"] != "HTML" {
+				t.Error("edited message formatting is missing")
+			}
 			if len(body["reply_markup"].(map[string]any)["inline_keyboard"].([]any)) != 0 {
 				t.Error("buttons not removed")
 			}
@@ -45,7 +51,7 @@ func TestTelegramWireContract(t *testing.T) {
 	}))
 	defer server.Close()
 	tg := &Telegram{url: server.URL + "/", client: server.Client()}
-	id, err := tg.Send(context.Background(), 42, "reason <b>untrusted</b>", "nonce")
+	id, err := tg.Send(context.Background(), 42, "<b>formatted safely upstream</b>", "nonce")
 	if err != nil || id != 7 {
 		t.Fatalf("send: %v", err)
 	}

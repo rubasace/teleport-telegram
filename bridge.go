@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -148,7 +149,7 @@ func (b *Bridge) eligible(r Request) bool {
 	return true
 }
 
-// Plain text with controls removed prevents request-provided formatting and
+// Control removal plus HTML escaping prevents request-provided formatting and
 // bidi controls from impersonating the trusted status/scope. No silent clipping:
 // requests too large to show in full receive no actionable message.
 func safeText(s string) string {
@@ -160,18 +161,42 @@ func safeText(s string) string {
 	}, s)
 }
 
+// htmlText is used for every value that did not originate in this binary.
+// Requesters must not be able to turn their reason or an identifier into a
+// trusted-looking heading, link, or button label.
+func htmlText(s string) string { return html.EscapeString(safeText(s)) }
+
 func (b *Bridge) prompt(r Request) (string, error) {
 	var scopes []string
 	for _, role := range r.Roles {
-		scopes = append(scopes, safeText(role)+": "+safeText(b.config.RoleScopes[role]))
+		scopes = append(scopes, fmt.Sprintf("• <b>%s</b>\n%s", htmlText(role), htmlText(b.config.RoleScopes[role])))
 	}
-	s := fmt.Sprintf("Solicitud de acceso · %s\nID: %s\nSolicitante: %s\nRoles y alcance:\n%s\n\nMotivo del solicitante: «%s»\n\nCreada: %s\nResponder antes de: %s\nAcceso hasta: %s\nSe concede el rol completo, no solo la operación descrita. Máximo 15 minutos; el tiempo restante puede ser menor.", safeText(b.config.Cluster), r.ID, safeText(r.User), strings.Join(scopes, "\n"), safeText(r.Reason), r.Created.UTC().Format(time.RFC3339), r.Expires.UTC().Format(time.RFC3339), r.AccessExpires.UTC().Format(time.RFC3339))
+	s := fmt.Sprintf("🛡️ <b>Solicitud de acceso</b>\n\n<b>Cluster</b> · <code>%s</code>\n<b>ID</b> · <code>%s</code>\n<b>Solicitante</b> · <code>%s</code>\n\n<b>Roles solicitados</b>\n%s\n\n<b>Motivo</b>\n<blockquote>%s</blockquote>\n\n<b>Ventana de decisión</b>\n<i>Creada</i> · <code>%s</code>\n<i>Responder antes de</i> · <code>%s</code>\n<i>Acceso hasta</i> · <code>%s</code>\n\n⚠️ <i>Se concede el rol completo, no sólo la operación descrita. Máximo 15 min.</i>", htmlText(b.config.Cluster), htmlText(r.ID), htmlText(r.User), strings.Join(scopes, "\n"), htmlText(r.Reason), r.Created.UTC().Format(time.RFC3339), r.Expires.UTC().Format(time.RFC3339), r.AccessExpires.UTC().Format(time.RFC3339))
 	// Byte bound is conservative for Telegram's UTF-16 character limit and
 	// reserves room for the final status appended later.
 	if len(s) > 3500 {
 		return "", errors.New("request too large to display safely")
 	}
 	return s, nil
+}
+
+func renderedFinal(final string) string {
+	switch final {
+	case "Estado en Teleport: APPROVED":
+		return "✅ <b>Aprobada en Teleport</b>"
+	case "Estado en Teleport: DENIED":
+		return "⛔ <b>Denegada en Teleport</b>"
+	case "Solicitud caducada o eliminada.":
+		return "⌛ <b>Solicitud caducada o eliminada</b>"
+	case "Solicitud caducada o fuera de la política del bridge.":
+		return "⚠️ <b>Solicitud fuera de la política o caducada</b>"
+	case "Solicitud modificada; revisar la nueva notificación.":
+		return "🔄 <b>Solicitud modificada</b>\nRevisa la nueva notificación."
+	case "Resultado incierto. Revisar en Teleport; no se reenviará la decisión.":
+		return "⚠️ <b>Resultado incierto</b>\nRevísalo en Teleport; no se reenviará la decisión."
+	default:
+		return "ℹ️ " + htmlText(final)
+	}
 }
 
 func (b *Bridge) persist() error { return saveState(b.config.StateFile, b.state) }
@@ -212,7 +237,7 @@ func (b *Bridge) reconcile(ctx context.Context) error {
 		}
 		if e.Final != "" && !e.Rendered && e.MessageID != 0 {
 			prompt, _ := b.prompt(e.Request)
-			if err := b.telegram.Edit(ctx, b.config.UserID, e.MessageID, prompt+"\n\n"+e.Final); err != nil {
+			if err := b.telegram.Edit(ctx, b.config.UserID, e.MessageID, prompt+"\n\n"+renderedFinal(e.Final)); err != nil {
 				return err
 			}
 			e.Rendered = true

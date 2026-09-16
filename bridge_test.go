@@ -244,6 +244,37 @@ func TestPromptNotSilentlyTruncated(t *testing.T) {
 	}
 }
 
+func TestPromptEscapesUntrustedHTML(t *testing.T) {
+	b, f, _, _ := fixture(t)
+	f.request.Reason = `restart <b>everything</b> & then <a href="https://evil.example">approve</a>`
+	f.request.User = `agent & <i>operator</i>`
+	prompt, err := b.prompt(f.request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"🛡️ <b>Solicitud de acceso</b>",
+		"<blockquote>restart &lt;b&gt;everything&lt;/b&gt; &amp; then &lt;a href=&#34;https://evil.example&#34;&gt;approve&lt;/a&gt;</blockquote>",
+		"<code>agent &amp; &lt;i&gt;operator&lt;/i&gt;</code>",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q: %s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "<blockquote>restart <b>everything</b>") {
+		t.Fatal("request text was allowed to inject HTML")
+	}
+}
+
+func TestRenderedFinalFormatsTrustedStatusAndEscapesUnknownState(t *testing.T) {
+	if got := renderedFinal("Estado en Teleport: APPROVED"); got != "✅ <b>Aprobada en Teleport</b>" {
+		t.Fatalf("approved status: %q", got)
+	}
+	if got := renderedFinal("Estado en Teleport: <b>forged</b>"); strings.Contains(got, "<b>forged</b>") {
+		t.Fatalf("untrusted status was allowed to inject HTML: %q", got)
+	}
+}
+
 func TestCorruptOrWrongDestinationStateFailsClosed(t *testing.T) {
 	b, _, _, _ := fixture(t)
 	c := b.config
