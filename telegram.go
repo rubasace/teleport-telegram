@@ -95,11 +95,11 @@ func (t *Telegram) call(ctx context.Context, method string, input, output any) e
 func (t *Telegram) Send(ctx context.Context, chat int64, text, nonce string) (int64, error) {
 	var result Message
 	err := t.call(ctx, "sendMessage", map[string]any{
-		"chat_id": chat, "text": text, "protect_content": true,
+		"chat_id": chat, "text": text, "parse_mode": "HTML", "protect_content": true,
 		"link_preview_options": map[string]bool{"is_disabled": true},
-		"reply_markup": map[string]any{"inline_keyboard": [][]map[string]string{{
-			{"text": "Aprobar", "callback_data": "a:" + nonce},
-			{"text": "Denegar", "callback_data": "d:" + nonce},
+		"reply_markup": map[string]any{"inline_keyboard": [][]map[string]any{{
+			{"text": "✅ Aprobar", "style": "success", "callback_data": "a:" + nonce},
+			{"text": "⛔ Denegar", "style": "danger", "callback_data": "d:" + nonce},
 		}}},
 	}, &result)
 	if err != nil {
@@ -112,7 +112,7 @@ func (t *Telegram) Send(ctx context.Context, chat int64, text, nonce string) (in
 }
 
 func (t *Telegram) Edit(ctx context.Context, chat, message int64, text string) error {
-	return t.call(ctx, "editMessageText", map[string]any{"chat_id": chat, "message_id": message, "text": text,
+	return t.call(ctx, "editMessageText", map[string]any{"chat_id": chat, "message_id": message, "text": text, "parse_mode": "HTML",
 		"link_preview_options": map[string]bool{"is_disabled": true},
 		"reply_markup":         map[string]any{"inline_keyboard": [][]any{}}}, nil)
 }
