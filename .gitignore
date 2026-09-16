@@ -1,0 +1,8 @@
+/teleport-telegram
+/state/
+/identity/
+/secrets/
+/config.local.json
+/token
+*.pem
+*.key

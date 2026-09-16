@@ -1,0 +1,41 @@
+kind: role
+version: v8
+metadata:
+  name: bridge-reviewer
+spec:
+  allow:
+    rules:
+      - resources: [access_request]
+        verbs: [list, read, update]
+---
+kind: role
+version: v8
+metadata:
+  name: requester
+spec:
+  allow:
+    request:
+      roles: [test-rw]
+      max_duration: 15m
+---
+kind: role
+version: v8
+metadata:
+  name: test-rw
+spec:
+  options:
+    max_session_ttl: 15m
+---
+kind: user
+version: v2
+metadata:
+  name: bridge
+spec:
+  roles: [bridge-reviewer]
+---
+kind: user
+version: v2
+metadata:
+  name: requester
+spec:
+  roles: [requester]

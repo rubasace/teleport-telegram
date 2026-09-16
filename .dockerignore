@@ -1,0 +1,9 @@
+.git
+state
+identity
+secrets
+config.local.json
+token
+*.pem
+*.key
+teleport-telegram

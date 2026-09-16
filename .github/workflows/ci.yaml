@@ -1,0 +1,49 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - run: go test -race ./...
+      - run: go vet ./...
+      - run: CGO_ENABLED=0 go build -trimpath -o /tmp/teleport-telegram .
+      - name: Check example YAML and JSON
+        run: |
+          python3 -m pip install --quiet pyyaml
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          import yaml
+          json.loads(Path('examples/config.json').read_text())
+          for path in Path('examples').glob('*.yaml'):
+              list(yaml.safe_load_all(path.read_text()))
+          PY
+      - name: Download verified Community test binaries
+        env:
+          TELEPORT_VERSION: 18.11.1
+        run: |
+          mkdir -p "$RUNNER_TEMP/teleport-community"
+          curl -fsSL --retry 3 "https://cdn.teleport.dev/teleport-v${TELEPORT_VERSION}-linux-amd64-bin.tar.gz" -o "$RUNNER_TEMP/teleport-community/archive.tar.gz"
+          curl -fsSL --retry 3 "https://cdn.teleport.dev/teleport-v${TELEPORT_VERSION}-linux-amd64-bin.tar.gz.sha256" -o "$RUNNER_TEMP/teleport-community/checksum"
+          python3 - <<'PY'
+          import hashlib, os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'teleport-community'
+          expected = (root / 'checksum').read_text().split()[0]
+          with (root / 'archive.tar.gz').open('rb') as archive:
+              assert hashlib.file_digest(archive, 'sha256').hexdigest() == expected
+          PY
+          tar -xzf "$RUNNER_TEMP/teleport-community/archive.tar.gz" -C "$RUNNER_TEMP/teleport-community" teleport/teleport teleport/tctl
+      - name: Test against real Teleport Community
+        run: bash test-integration.sh "$RUNNER_TEMP/teleport-community/teleport/teleport" "$RUNNER_TEMP/teleport-community/teleport/tctl"

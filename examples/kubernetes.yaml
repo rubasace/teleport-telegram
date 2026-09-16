@@ -1,0 +1,216 @@
+# Review all example values before enabling the single replica. No real secrets included.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: teleport-approvals
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: telegram-approver
+  namespace: teleport-approvals
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: telegram-approver-state
+  namespace: teleport-approvals
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: telegram-approver
+  namespace: teleport-approvals
+data:
+  config.json: |
+    {
+      "auth_address": "teleport-cluster-auth.teleport.svc.cluster.local:3025",
+      "identity_file": "/identity/identity",
+      "token_file": "/secrets/telegram-token",
+      "state_file": "/state/state.json",
+      "cluster": "teleport.example.com",
+      "requester": "agent",
+      "role_scopes": {
+        "maintenance": "Restart and scale the permitted application workloads. This role grants its full configured scope, not just the operation in the reason."
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram-approver
+  namespace: teleport-approvals
+spec:
+  replicas: 0
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: telegram-approver
+  template:
+    metadata:
+      labels:
+        app: telegram-approver
+    spec:
+      serviceAccountName: telegram-approver
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: bridge
+        image: ghcr.io/example/teleport-telegram:bootstrap
+        args:
+        - -config
+        - /config/config.json
+        env:
+        - name: TELEGRAM_APPROVER_ID
+          value: '0'
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        ports:
+        - name: health
+          containerPort: 8080
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: health
+          periodSeconds: 15
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          periodSeconds: 30
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+        volumeMounts:
+        - name: config
+          mountPath: /config
+          readOnly: true
+        - name: telegram
+          mountPath: /secrets
+          readOnly: true
+        - name: identity
+          mountPath: /identity
+          readOnly: true
+        - name: state
+          mountPath: /state
+      - name: tbot
+        image: public.ecr.aws/gravitational/tbot-distroless:18.11.1
+        args:
+        - start
+        - identity
+        - --proxy-server=teleport.example.com:443
+        - --join-method=kubernetes
+        - --token=telegram-approver-join
+        - --destination=file:///identity
+        - --storage=file:///bot-state
+        - --certificate-ttl=1h
+        - --renewal-interval=20m
+        - --log-format=json
+        env:
+        - name: KUBERNETES_TOKEN_PATH
+          value: /var/run/secrets/tokens/join-sa-token
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+        volumeMounts:
+        - name: identity
+          mountPath: /identity
+        - name: bot-state
+          mountPath: /bot-state
+        - name: join-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          name: telegram-approver
+      - name: telegram
+        secret:
+          secretName: telegram-approver
+          defaultMode: 288
+          items:
+          - key: token
+            path: telegram-token
+      - name: identity
+        emptyDir:
+          medium: Memory
+      - name: bot-state
+        emptyDir:
+          medium: Memory
+      - name: state
+        persistentVolumeClaim:
+          claimName: telegram-approver-state
+      - name: join-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: join-sa-token
+              expirationSeconds: 600
+              audience: teleport.example.com
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: telegram-approver
+  namespace: teleport-approvals
+spec:
+  podSelector:
+    matchLabels:
+      app: telegram-approver
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress: []
+  egress:
+  - ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  - ports:
+    - protocol: TCP
+      port: 443
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: teleport-cluster
+          app.kubernetes.io/component: auth
+      namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: teleport
+    ports:
+    - protocol: TCP
+      port: 3025

@@ -1,0 +1,37 @@
+# Community's administrative Access Request API, not Enterprise review rules.
+# No resource access, request creation, user/role updates, or signing rights.
+apiVersion: resources.teleport.dev/v1
+kind: TeleportRoleV8
+metadata:
+  name: telegram-approver
+  namespace: teleport
+spec:
+  allow:
+    rules:
+      - resources: ['access_request']
+        verbs: ['list', 'read', 'update']
+  options:
+    max_session_ttl: 1h
+---
+apiVersion: resources.teleport.dev/v1
+kind: TeleportBotV1
+metadata:
+  name: telegram-approver
+  namespace: teleport
+spec:
+  roles: ['telegram-approver']
+  max_session_ttl: 1h
+---
+apiVersion: resources.teleport.dev/v2
+kind: TeleportProvisionToken
+metadata:
+  name: telegram-approver-join
+  namespace: teleport
+spec:
+  roles: ['Bot']
+  bot_name: telegram-approver
+  join_method: kubernetes
+  kubernetes:
+    type: in_cluster
+    allow:
+      - service_account: 'teleport-approvals:telegram-approver'

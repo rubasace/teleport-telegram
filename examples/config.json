@@ -1,0 +1,11 @@
+{
+  "auth_address": "teleport-cluster-auth.teleport.svc.cluster.local:3025",
+  "identity_file": "/identity/identity",
+  "token_file": "/secrets/telegram-token",
+  "state_file": "/state/state.json",
+  "cluster": "teleport.example.com",
+  "requester": "agent",
+  "role_scopes": {
+    "maintenance": "Restart and scale the permitted application workloads. This role grants its full configured scope, not just the operation in the reason."
+  }
+}
