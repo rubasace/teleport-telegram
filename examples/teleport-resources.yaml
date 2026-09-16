@@ -20,7 +20,8 @@ metadata:
   namespace: teleport
 spec:
   roles: ['telegram-approver']
-  max_session_ttl: 1h
+  # TeleportBotV1 is decoded as google.protobuf.Duration.
+  max_session_ttl: 3600s
 ---
 apiVersion: resources.teleport.dev/v2
 kind: TeleportProvisionToken
